@@ -17,8 +17,7 @@ Grand Challenge inference container for our ISLES'26 submission: an ensemble of
   statistically significant difference vs 8-fold mirroring).
 - **Post-processing**: probability threshold 0.35, then volume-conditioned
   connected-component filtering (26-connectivity) — components ≤ 0.02 / 0.02 /
-  0.1 ml are removed when the total predicted volume is < 3.5 ml / 3.5–35 ml /
-  > 35 ml; cases with a remaining volume < 0.02 ml are reported as empty.
+  0.1 ml are removed when the total predicted volume is < 3.5 ml / 3.5–35 ml / > 35 ml; cases with a remaining volume < 0.02 ml are reported as empty.
 
 ## Repository layout
 
