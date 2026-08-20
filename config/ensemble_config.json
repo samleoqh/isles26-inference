@@ -1,0 +1,58 @@
+{
+  "model_root": "/opt/ml/model",
+  "_comment": "Final ISLES'26 submission: 10 models — ResEnc-L x5 folds + ResEncM-Viola2Plus (copy-paste trained) folds {0,2,4,5,6}. TTA disabled, patch_batch=4. Post-processing calibrated on out-of-fold predictions (threshold 0.35 + volume-conditioned component filtering + empty-case rule).",
+  "arms": {
+    "thin": [
+      {
+        "name": "resencl",
+        "ckpt_root": "Dataset001ResEncL_ISLES26",
+        "folds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "chk": "checkpoint_final",
+        "weight": 1.0
+      },
+      {
+        "name": "d4_rmcp",
+        "ckpt_root": "Dataset004ResEncMViola2Plus_ISLES26_s7",
+        "folds": [
+          0,
+          2,
+          4,
+          5,
+          6
+        ],
+        "chk": "checkpoint_final",
+        "weight": 1.0
+      }
+    ]
+  },
+  "tta": {
+    "mode": "none"
+  },
+  "postproc": {
+    "threshold": 0.35,
+    "vcap": {
+      "v1_ml": 3.5,
+      "v2_ml": 35.0,
+      "tau_ml": [
+        0.02,
+        0.02,
+        0.1
+      ]
+    },
+    "empty": {
+      "tau_vol_ml": 0.02,
+      "zero_soft": true
+    }
+  },
+  "patch_batch": 4,
+  "routing": {
+    "thick_max_spacing_mm": 2.0,
+    "_comment": "Cases whose largest anatomical spacing exceeds this value route to the 'thick' arm; only 'thin' models are configured, so all cases fall back to thin."
+  }
+}

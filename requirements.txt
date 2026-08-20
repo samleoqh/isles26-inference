@@ -1,0 +1,18 @@
+# Pinned to the exact versions used for the submitted container image.
+# torch/torchvision come from the base image (pytorch:2.13.0-cuda12.6-cudnn9-runtime)
+# through --system-site-packages — do NOT pin them here (a pip reinstall would
+# pull a different wheel than the validated one).
+# The resampling replication in infer_monai.py depends on scikit-image behavior;
+# the post-processing parameters were calibrated against these exact versions.
+
+# Grand Challenge invoke API server (from official template)
+fastapi==0.141.1
+uvicorn==0.52.0
+# I/O
+SimpleITK==2.5.6
+nibabel==5.4.2
+# inference pipeline (infer_monai)
+monai==1.4.0
+scipy==1.17.1
+scikit-image==0.26.0
+numpy==1.26.4
