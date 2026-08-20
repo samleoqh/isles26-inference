@@ -1,7 +1,7 @@
 # ISLES'26 — Stroke Lesion Segmentation (Inference Container)
 
 Grand Challenge inference container for our ISLES'26 submission: an ensemble of
-10 residual-encoder 3D U-Net models with volume-conditioned post-processing.
+10 residual-encoder 3D U-Net models with [volume-conditioned post-processing](https://arxiv.org/abs/2608.16377).
 
 ## Method summary
 
