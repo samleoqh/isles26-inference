@@ -1,18 +1,17 @@
-"""Viola-Plus: Final Production Architecture for ISLES'26.
+"""Network architectures for the ISLES'26 submission.
 
-Integrates Comprehensive Expert Reviews & Medical AI Innovations:
-1. Protected Parameter Re-initialization:
-   - `ViolaAxisPool` implements `reset_parameters()` to safely reset `alpha`.
-   - `ViolaGlobalAttention` calls `reset_parameters()` on all sub-pools and `axis_weights`.
-   - Both attention variants are protected in `initialize()` against generic Kaiming reset.
-2. MobileNet-Style Non-Linear Channel Mixing:
-   - `LocalSpatialGate` implements `DWConv3d -> GroupNorm -> LeakyReLU -> PWConv3d -> GroupNorm -> LeakyReLU -> Conv3d`.
-   - Eliminates linear degeneration between depthwise and pointwise convolutions.
-3. Channel Alignment by Construction:
-   - `LocalSpatialGate` gate_channels is wired from `input_features_below`, which matches
-     `lres_input` channels at every decoder stage; a 6-stage assert guards the attention split.
-4. ResNet-D Full Parity:
-   - Restored full `BasicBlockD` and `BottleneckD` with optional Stochastic Depth and Squeeze-and-Excitation support.
+Two model families are defined here:
+  - ResidualViolaPlusUNet: ResNet-D residual encoder + attention-gated decoder
+    (tri-axial global attention in deep stages, boost-only local spatial gate
+    in shallow stages).
+  - ResidualEncoderUNet: stock nnU-Net ResEnc-L architecture, reassembled from
+    local blocks (ResidualEncoder + model_arch.UNetDecoder); loads checkpoints
+    trained with dynamic_network_architectures (0 missing / 0 unexpected keys,
+    forward parity verified).
+
+Both attention modules implement reset_parameters() so that generic weight
+re-initialization (He/Kaiming sweeps) cannot wipe their identity-initialized
+gating parameters.
 """
 
 from typing import List, Optional, Sequence, Tuple, Union
@@ -23,7 +22,6 @@ import torch.nn.functional as F
 from model_arch import (
     InitWeights_He,
     StackedConvBlocks,
-    PlainConvEncoder,
     UNetDecoder,
     get_matching_convtransp,
     get_matching_pool_op,
@@ -591,43 +589,8 @@ class UNetViolaPlusDecoder(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Full Models (Plain & Residual Variants)
+# Full models (final submission architectures)
 # ─────────────────────────────────────────────────────────────────────────────
-
-class PlainViolaPlusUNet(nn.Module):
-    """PlainConvEncoder + UNetViolaPlusDecoder."""
-
-    def __init__(self, input_channels: int, n_stages: int, features_per_stage: Sequence[int],
-                 conv_op, kernel_sizes, strides, n_conv_per_stage, num_classes: int,
-                 n_conv_per_stage_decoder, conv_bias: bool = False, norm_op=None,
-                 norm_op_kwargs=None, dropout_op=None, dropout_op_kwargs=None,
-                 nonlin=None, nonlin_kwargs=None, deep_supervision: bool = False, nonlin_first: bool = False,
-                 gate_mode: str = "boost", suppress_scale: float = 1.0):
-        super().__init__()
-        self.encoder = PlainConvEncoder(input_channels, n_stages, features_per_stage, conv_op,
-                                        kernel_sizes, strides, n_conv_per_stage, conv_bias,
-                                        norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs,
-                                        nonlin, nonlin_kwargs, return_skips=True,
-                                        nonlin_first=nonlin_first)
-        self.decoder = UNetViolaPlusDecoder(self.encoder, num_classes, n_conv_per_stage_decoder,
-                                            deep_supervision, nonlin_first=nonlin_first,
-                                            gate_mode=gate_mode, suppress_scale=suppress_scale)
-        # apply() recurses bottom-up, matching nnUNet's `network.apply(network.initialize)`
-        # exactly -> standalone (e.g. MONAI) construction gets identical initialization.
-        self.apply(self.initialize)
-
-    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, List[torch.Tensor]]:
-        skips = self.encoder(x)
-        return self.decoder(skips)
-
-    @staticmethod
-    def initialize(module: nn.Module):
-        InitWeights_He(1e-2)(module)
-        # Protect learnable Viola attention parameters from being wiped by He re-init
-        for m in module.modules():
-            if isinstance(m, (ViolaGlobalAttention, LocalSpatialGate)):
-                m.reset_parameters()
-
 
 class ResidualViolaPlusUNet(nn.Module):
     """ResidualEncoder + UNetViolaPlusDecoder."""
@@ -702,77 +665,3 @@ class ResidualEncoderUNet(nn.Module):
     def forward(self, x):
         return self.decoder(self.encoder(x))
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. Model Builders for ISLES'26 (D1 Iso / D3 Aniso)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_PLANS_COMMON = dict(
-    conv_bias=True,
-    norm_op=nn.InstanceNorm3d,
-    norm_op_kwargs={"eps": 1e-5, "affine": True},
-    dropout_op=None, dropout_op_kwargs=None,
-    nonlin=nn.LeakyReLU, nonlin_kwargs={"inplace": True},
-)
-
-
-def build_plain_viola_plus_unet_d1(deep_supervision: bool = False) -> PlainViolaPlusUNet:
-    """Dataset001 (1mm iso 3d_fullres) geometry."""
-    return PlainViolaPlusUNet(
-        input_channels=1, n_stages=6,
-        features_per_stage=(32, 64, 128, 256, 320, 320),
-        conv_op=nn.Conv3d,
-        kernel_sizes=[(3, 3, 3)] * 6,
-        strides=[(1, 1, 1)] + [(2, 2, 2)] * 5,
-        n_conv_per_stage=(2, 2, 2, 2, 2, 2),
-        num_classes=2,
-        n_conv_per_stage_decoder=(2, 2, 2, 2, 2),
-        deep_supervision=deep_supervision,
-        **_PLANS_COMMON,
-    )
-
-
-def build_plain_viola_plus_unet_d3(deep_supervision: bool = False) -> PlainViolaPlusUNet:
-    """Dataset003 (RAS 1x1x3) plans geometry."""
-    return PlainViolaPlusUNet(
-        input_channels=1, n_stages=6,
-        features_per_stage=(32, 64, 128, 256, 320, 320),
-        conv_op=nn.Conv3d,
-        kernel_sizes=[(1, 3, 3)] + [(3, 3, 3)] * 5,
-        strides=[(1, 1, 1), (1, 2, 2)] + [(2, 2, 2)] * 4,
-        n_conv_per_stage=(2, 2, 2, 2, 2, 2),
-        num_classes=2,
-        n_conv_per_stage_decoder=(2, 2, 2, 2, 2),
-        deep_supervision=deep_supervision,
-        **_PLANS_COMMON,
-    )
-
-
-def build_residual_viola_plus_unet_d3(deep_supervision: bool = False) -> ResidualViolaPlusUNet:
-    """Dataset003 (RAS 1x1x3) plans geometry with ResNet-D Encoder."""
-    return ResidualViolaPlusUNet(
-        input_channels=1, n_stages=6,
-        features_per_stage=(32, 64, 128, 256, 320, 320),
-        conv_op=nn.Conv3d,
-        kernel_sizes=[(1, 3, 3)] + [(3, 3, 3)] * 5,
-        strides=[(1, 1, 1), (1, 2, 2)] + [(2, 2, 2)] * 4,
-        n_blocks_per_stage=(2, 2, 2, 2, 2, 2),
-        num_classes=2,
-        n_conv_per_stage_decoder=(2, 2, 2, 2, 2),
-        deep_supervision=deep_supervision,
-        **_PLANS_COMMON,
-    )
-
-
-if __name__ == "__main__":
-    for name, builder in [
-        ("PlainViolaPlusUNet-D1", build_plain_viola_plus_unet_d1),
-        ("PlainViolaPlusUNet-D3", build_plain_viola_plus_unet_d3),
-        ("ResidualViolaPlusUNet-D3", build_residual_viola_plus_unet_d3),
-    ]:
-        net = builder()
-        n_params = sum(p.numel() for p in net.parameters()) / 1e6
-        x = torch.randn(1, 1, 32, 160, 160)
-        with torch.no_grad():
-            y = net(x)
-        print(f"{name}: params={n_params:.1f}M  in={tuple(x.shape)}  out={tuple(y.shape)}")
